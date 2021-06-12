@@ -1,0 +1,4 @@
+{
+    "appService.defaultWebAppToDeploy": "/subscriptions/acc4c105-3630-4803-b1df-f485f56f971d/resourceGroups/MEAN/providers/Microsoft.Web/sites/pablotparejameantest",
+    "appService.deploySubpath": "."
+}
