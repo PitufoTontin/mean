@@ -4,7 +4,6 @@ var express = require('express');
 var _ = require('lodash');
 const { MongoClient } = require('mongodb');
 var mongodb = require('mongodb');
-var mongoose = require('mongoose');
 var debug = require('debug')('app');
 
 //Go get your configuration settings
@@ -12,50 +11,31 @@ var config = require('./config.js');
 debug("Mongo is available at", config.mongoServer, ":", config.mongoPort);
 
 // Connect to MongoDB
+var mongo = null;
+var persons = null;
 var mongoURL = "mongodb://" + config.mongoServer + ":" + config.mongoPort;
-mongoose.connect(mongoURL + "/msdn-mean", { useNewUrlParser: true, useUnifiedTopology: true });
+debug("Attempting connection to mongo @", mongoURL);
+MongoClient.connect(mongoURL, function (err, client) {
+    if (err) {
+        debug("ERROR:", err);
+    }
+    else {
+        debug("Connected correctly to server");
+        mongo = client.db("msdn-mean");
+        mongo.collections(function (err, collections) {
+            if (err) {
+                debug("ERROR:", err);
+            }
+            else {
+                for (var c in collections) {
+                    debug("Found collection", collections[c]);
+                }
 
-//Define our Mongoose Schema
-var personSchema = mongoose.Schema({
-    created: {
-        type: Date,
-        default: Date.now()
-    },
-    updated: {
-        type: Date,
-    },
-    firstName: {
-        type: String,
-        required: true,
-        default: "(No name specified)"
-    },
-    lastName: {
-        type: String,
-        required: true,
-        default: "(No lastname specified)"
-    },
-    status: {
-        type: String,
-        required: true,
-        enum: [
-            "Reading MSDN",
-            "WCFing",
-            "RESTing",
-            "VBing",
-            "C#ing"
-        ],
-        default: "Reading MSDN"
+                persons = mongo.collection("persons");
+            }
+        });
     }
 });
-
-personSchema.pre("save", function (next) {
-    this.updated = new Date();
-    next();
-});
-
-personSchema.method("speak", function () { console.log("Don't bother me, I'm", status) });
-
-var Person = mongoose.model('Person', personSchema, "persons");
 
 // Create express instance
 var app = express();
@@ -72,14 +52,14 @@ app.get('/', function (req, res) {
 });
 
 var getAllPersons = function (req, res) {
-    Person.find(function (err, persons) {
+    persons.find({}).toArray(function (err, results) {
         if (err) {
             debug("getAllPersons--ERROR:", err);
             res.status(500).jsonp(err);
         }
         else {
-            debug("getAllPersons:", persons);
-            res.status(200).jsonp(persons);
+            debug("getAllPersons:", results);
+            res.status(200).jsonp(results);
         }
     });
 }
@@ -95,29 +75,37 @@ app.get('/persons/:personId', getPerson);
 app.param('personId', function (req, res, next, personId) {
     debug("personId found:", personId);
     if (mongodb.ObjectId.isValid(personId)) {
-        Person.findById(personId).then(function (person) {
-            debug("Found", person.lastName);
-            req.person = person;
-            next();
-        });
+        persons.find({ "_id": new mongodb.ObjectId(personId) })
+            .toArray(function (err, docs) {
+                if (err) {
+                    debug("ERROR: personId:", err);
+                    res.status(500).jsonp(err);
+                }
+                else if (docs.length < 1) {
+                    res.status(404).jsonp({ message: 'ID ' + personId + ' not found' });
+                }
+                else {
+                    debug("person:", docs[0]);
+                    req.person = docs[0];
+                    next();
+                }
+            });
     }
     else {
         res.status(404).jsonp({ message: 'ID ' + personId + ' not found' });
     }
-});
 
-// Person.find({}).sort({ 'firstName': 'asc', 'lastName': 'desc' }).select({ 'firstName lastName status'}).then(function (persons) {
-//     //Do something with the returned persons
-// });
+});
 
 var deletePerson = function (req, res) {
     debug("Removing", req.person.firstName, req.person.lastName);
-    req.person.delete(function (err, result) {
+    persons.deleteOne({ "_id": req.person._id }, function (err, result) {
         if (err) {
             debug("deletePerson: ERROR:", err);
             res.status(500).jsonp(err);
         }
         else {
+            req.person._id = undefined;
             res.status(200).jsonp(req.person);
         }
     });
@@ -127,10 +115,11 @@ app.delete('/persons/:personId', deletePerson);
 
 
 var insertPerson = function (req, res) {
-    var person = new Person(req.body);
+    var person = req.body;
     debug("Received", person);
-
-    person.save(person, function (err, person) {
+    // person.id = personData.length + 1;
+    // personData.push(person);
+    persons.insert(person, function (err, result) {
         if (err) {
             res.status(500).jsonp(err);
         }
@@ -146,13 +135,14 @@ app.post('/persons', insertPerson);
 var updatePerson = function (req, res) {
     debug("Updating", req.person, "with", req.body);
     _.merge(req.person, req.body);
-    //The req.person is already a Person, so just update()
-    req.person.save(function (err, person) {
+    persons.updateOne({ "_id": req.person._id }, {
+        $set: { firstName: req.person.firstName, lastName: req.person.lastName, status: req.person.status }
+    }, function (err, result) {
         if (err) {
             res.status(500).jsonp(err);
         }
         else {
-            res.status(200).jsonp(person);
+            res.status(200).jsonp(result);
         }
     });
 }
