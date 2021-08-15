@@ -6,6 +6,8 @@ const { MongoClient } = require('mongodb');
 var mongodb = require('mongodb');
 var mongoose = require('mongoose');
 var debug = require('debug')('app');
+var passport = require('passport');
+var LocalStrategy = require('passport-local').Strategy;
 
 //Go get your configuration settings
 var config = require('./config.js');
@@ -60,9 +62,44 @@ var Person = mongoose.model('Person', personSchema, "persons");
 // Create express instance
 var app = express();
 app.use(bodyParser.json());
+// Passport
+app.use(passport.initialize());
+passport.use(new LocalStrategy(function (username, password, done) {
+    debug("Authenticating ", username, ",", password);
+    if (username === "sa" && password === "nopassword") {
+        var user = {
+            username: "ted",
+            firstName: "Ted",
+            lastName: "Neward",
+            id: 1
+        };
+
+        return done(null, user);
+    } else {
+        return done(null, false, { message: "DENIED" });
+    }
+}));
+
+// Passport using session cookies
+passport.serializeUser(function (user, done) {
+    done(null, user.id);
+});
+
+passport.deserializeUser(function (id, done) {
+    User.findById(id, function (err, user) {
+        done(err, user);
+    });
+});
+
 app.use((req, res, next) => {
     res.append('Content-Type', 'application/json');
     next();
+});
+
+// Authentication
+app.post('/login', passport.authenticate('local', { session: false }), function (req, res) {
+    debug("user ", req.user.firstName, " authenticated against the system");
+    res.redirect("/persons");
 });
 
 // Set up a simple route
