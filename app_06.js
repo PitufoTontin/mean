@@ -6,14 +6,86 @@ const { MongoClient } = require('mongodb');
 var mongodb = require('mongodb');
 var mongoose = require('mongoose');
 var debug = require('debug')('app');
+var cosmosDB = require('@azure/cosmos');
 
 //Go get your configuration settings
 var config = require('./config.js');
-debug("Mongo is available at", config.mongoServer, ":", config.mongoPort);
+debug("Mongo is available at ", config.mongoServer, ":", config.mongoPort);
+debug("DocDB is available at ", config.docdbServer);
 
 // Connect to MongoDB
 var mongoURL = "mongodb://" + config.mongoServer + ":" + config.mongoPort;
 mongoose.connect(mongoURL + "/msdn-mean", { useNewUrlParser: true, useUnifiedTopology: true });
+
+// Connecto to DocumentDB
+const cosmosClient = new cosmosDB.CosmosClient({ endpoint: config.docdbServer, key: config.docdbKey });
+// cosmosClient.databases.readAll().fetchAll().then((databases) => {
+//     debug(databases.resources);
+//     databases.resources.map((resource) => {
+//         cosmosClient.database(resource.id).containers.readAll().fetchAll().then((containers) => {
+//             debug(containers);
+//         });
+//     });
+// });
+
+cosmosClient.queryDatabases({
+    query: 'SELECT * FROM root r WHERE r.id = @id',
+    parameters: [
+        {
+            name: '@id',
+            value: 'conferencedb'
+        }
+    ]
+}).toArray(function (err, results) {
+    if (err) {
+        handleError(err);
+    }
+
+    if (results.length === 0) {
+        // No error occured, but there were no results returned
+        // indicating no database exists matching the query
+        // so, explictly return null
+        debug("No results found");
+    } else {
+        debug('Found a database: ', results[0]);
+        var docDB = results[0];
+        debug('Looking for collections:');
+        cosmosClient.readCollections('dbs/conferencedb').toArray(function (err, colls) {
+            if (err) {
+                debug(err);
+            }
+            else {
+                if (colls.length === 0) {
+                    debug("No collections found");
+                }
+                else {
+                    for (var c in colls) {
+                        debug("Found collection", colls[c]);
+                        if (colls[c].id === 'presentations') {
+                            presentationColl = colls[c];
+                        }
+                    }
+                }
+            }
+        });
+    }
+});
+
+var getAllPresentations = function (req, res) {
+    debug("Getting all presentations from DocumentDB:");
+    cosmosClient.queryDocuments("dbs/conferencedb/colls/presentations", {
+        query: "SELECT * FROM presentations p"
+    }).toArray(function (err, results) {
+        if (err) {
+            res.status(500).jsonp(err);
+        }
+        else {
+            res.status(200).jsonp(results);
+        }
+    });
+}
+
+app.get('/presentations', getAllPresentations);
 
 //Define our Mongoose Schema
 var personSchema = mongoose.Schema({
