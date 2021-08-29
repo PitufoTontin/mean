@@ -1,0 +1,6 @@
+
+az appservice plan create -g MEAN -n meanappserviceplan
+
+az webapp deployment user set --user-name pablotparejamean --password Anill*s2021
+az webapp create --resource-group MEAN --plan "Pago por uso" --name pablotparejameantest --runtime "node|14-lts" --deployment-local-git
+
